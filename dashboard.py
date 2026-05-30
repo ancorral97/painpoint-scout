@@ -292,9 +292,7 @@ with st.sidebar:
     inc_yt_shorts  = st.toggle("🔴 YouTube Shorts",  value=False)
     inc_yt_videos  = st.toggle("▶️ YouTube Videos",  value=False)
     inc_ph         = st.toggle("🟠 Product Hunt",    value=False)
-    inc_twitter    = st.toggle("🐦 Twitter / X",     value=False)
-    if inc_twitter and not os.environ.get("TWITTER_BEARER_TOKEN"):
-        st.caption("⚠️ Requiere TWITTER_BEARER_TOKEN en .env — [Obtener gratis](https://developer.twitter.com/en/portal/dashboard)")
+    st.caption("🐦 Twitter/X — requiere plan de pago ($100/mes). No disponible.")
 
     selected_subs = []
     if inc_reddit:
@@ -322,7 +320,6 @@ with st.sidebar:
                 include_yt_shorts=inc_yt_shorts,
                 include_yt_videos=inc_yt_videos,
                 include_ph=inc_ph,
-                include_twitter=inc_twitter,
             )
             new_posts = sum(results.values())
             st.cache_data.clear()
@@ -365,11 +362,10 @@ with st.sidebar:
     if inc_yt_shorts: active_sources.append("YouTube Shorts")
     if inc_yt_videos: active_sources.append("YouTube Videos")
     if inc_ph:        active_sources.append("Product Hunt")
-    if inc_twitter:   active_sources.append("Twitter / X")
 
     source_filter = st.multiselect(
         "Fuente",
-        ["Reddit", "Hacker News", "YouTube Shorts", "YouTube Videos", "Product Hunt", "Twitter / X"],
+        ["Reddit", "Hacker News", "YouTube Shorts", "YouTube Videos", "Product Hunt"],
         default=active_sources,
         placeholder="Todas las fuentes",
     )
@@ -497,7 +493,6 @@ if source_filter:
     if "YouTube Shorts"  in source_filter: masks.append(flt["source"] == "youtube_shorts")
     if "YouTube Videos"  in source_filter: masks.append(flt["source"] == "youtube_videos")
     if "Product Hunt"    in source_filter: masks.append(flt["source"] == "producthunt")
-    if "Twitter / X"    in source_filter: masks.append(flt["source"] == "twitter")
     if masks:
         import functools, operator
         combined = functools.reduce(operator.or_, masks)
