@@ -1,3 +1,4 @@
+import os
 import json
 import streamlit as st
 import pandas as pd
@@ -123,11 +124,57 @@ st.markdown("""
   div[data-testid="stMultiSelect"] > div { border-radius: 8px !important; }
   .stSlider > div > div > div { border-radius: 4px !important; }
   [data-testid="stExpander"] { background: #0f0f1a !important; border: 1px solid #1e2035 !important; border-radius: 10px !important; }
+
+  @media (max-width: 768px) {
+    .main .block-container { padding: 1rem !important; }
+    .metric-row { flex-direction: column; gap: 8px; }
+    .opp-card { padding: 14px 16px; }
+    .opp-score { position: static; margin-bottom: 8px; display: inline-block; }
+    .opp-title { padding-right: 0; }
+  }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def check_setup() -> list[dict]:
+    """Returns list of setup items with status."""
+    import os
+    items = []
+    # Check API key
+    has_key = bool(os.environ.get("ANTHROPIC_API_KEY", ""))
+    items.append({"label": "Anthropic API Key", "ok": has_key, "fix": "Agrega ANTHROPIC_API_KEY a tu .env"})
+    # Check data
+    init_db()
+    s = Session()
+    count = s.query(func.count(PainPoint.id)).scalar() or 0
+    s.close()
+    items.append({"label": f"Datos scrapeados ({count} posts)", "ok": count > 0, "fix": "Haz click en 🚀 Buscar Oportunidades"})
+    analyzed_s = Session()
+    a_count = analyzed_s.query(func.count(PainPoint.id)).filter(PainPoint.analyzed == 1).scalar() or 0
+    analyzed_s.close()
+    items.append({"label": f"Posts analizados ({a_count} de {count})", "ok": a_count > 0, "fix": "Haz click en 🚀 Buscar Oportunidades"})
+    return items
+
+
+@st.cache_data(ttl=60)
+def get_last_updated():
+    init_db()
+    s = Session()
+    latest = s.query(func.max(PainPoint.scraped_at)).scalar()
+    s.close()
+    if latest:
+        from datetime import datetime, timezone
+        diff = datetime.utcnow() - latest
+        if diff.days > 0:
+            return f"Última actualización: hace {diff.days} días"
+        elif diff.seconds > 3600:
+            return f"Última actualización: hace {diff.seconds // 3600}h"
+        else:
+            return f"Última actualización: hace {diff.seconds // 60} min"
+    return "Sin datos aún"
+
 
 def parse_extra(s: str) -> tuple[str, dict]:
     if s and "|||" in s:
@@ -246,6 +293,8 @@ with st.sidebar:
     inc_yt_videos  = st.toggle("▶️ YouTube Videos",  value=False)
     inc_ph         = st.toggle("🟠 Product Hunt",    value=False)
     inc_twitter    = st.toggle("🐦 Twitter / X",     value=False)
+    if inc_twitter and not os.environ.get("TWITTER_BEARER_TOKEN"):
+        st.caption("⚠️ Requiere TWITTER_BEARER_TOKEN en .env — [Obtener gratis](https://developer.twitter.com/en/portal/dashboard)")
 
     selected_subs = []
     if inc_reddit:
@@ -261,48 +310,51 @@ with st.sidebar:
     run_btn = st.button("🚀 Buscar Oportunidades", use_container_width=True, type="primary")
 
     if run_btn:
-        # ── Step 1: Scrape ──
-        status = st.empty()
-        status.info("⏳ Paso 1/2 — Scrapeando fuentes...")
-        results = run_scraper(
-            subreddits=selected_subs,
-            limit=limit,
-            include_reddit=inc_reddit,
-            include_hn=inc_hn,
-            include_yt_shorts=inc_yt_shorts,
-            include_yt_videos=inc_yt_videos,
-            include_ph=inc_ph,
-            include_twitter=inc_twitter,
-        )
-        new_posts = sum(results.values())
-        st.cache_data.clear()
-
-        # ── Step 2: Analyze ──
-        _, _, _, pending_count = get_counts()
-        if pending_count == 0:
-            status.success(f"✓ {new_posts} posts nuevos — nada pendiente de analizar")
-        else:
-            status.info(f"⏳ Paso 2/2 — Analizando {pending_count} posts con Claude AI...")
-            prog_bar  = st.progress(0)
-            prog_text = st.empty()
-
-            def on_progress(done, total, title):
-                prog_bar.progress(done / total)
-                prog_text.caption(f"({done}/{total}) {title}...")
-
-            pain_found = run_analyzer(batch_size=min(50, pending_count), progress_callback=on_progress)
-            prog_bar.empty()
-            prog_text.empty()
-
-            # Mark trending after analysis
-            mark_trending()
-
-            _, _, _, still_pending = get_counts()
-            status.success(
-                f"✓ {new_posts} posts nuevos · {pain_found} oportunidades identificadas"
-                + (f" · {still_pending} pendientes" if still_pending else "")
+        try:
+            # ── Step 1: Scrape ──
+            status = st.empty()
+            status.info("⏳ Paso 1/2 — Scrapeando fuentes...")
+            results = run_scraper(
+                subreddits=selected_subs,
+                limit=limit,
+                include_reddit=inc_reddit,
+                include_hn=inc_hn,
+                include_yt_shorts=inc_yt_shorts,
+                include_yt_videos=inc_yt_videos,
+                include_ph=inc_ph,
+                include_twitter=inc_twitter,
             )
+            new_posts = sum(results.values())
             st.cache_data.clear()
+
+            # ── Step 2: Analyze ──
+            _, _, _, pending_count = get_counts()
+            if pending_count == 0:
+                status.success(f"✓ {new_posts} posts nuevos — nada pendiente de analizar")
+            else:
+                status.info(f"⏳ Paso 2/2 — Analizando {pending_count} posts con Claude AI...")
+                prog_bar  = st.progress(0)
+                prog_text = st.empty()
+
+                def on_progress(done, total, title):
+                    prog_bar.progress(done / total)
+                    prog_text.caption(f"({done}/{total}) {title}...")
+
+                pain_found = run_analyzer(batch_size=min(50, pending_count), progress_callback=on_progress)
+                prog_bar.empty()
+                prog_text.empty()
+
+                # Mark trending after analysis
+                mark_trending()
+
+                _, _, _, still_pending = get_counts()
+                status.success(
+                    f"✓ {new_posts} posts nuevos · {pain_found} oportunidades identificadas"
+                    + (f" · {still_pending} pendientes" if still_pending else "")
+                )
+                st.cache_data.clear()
+        except Exception as _e:
+            st.error(f"❌ Error durante el scraping/análisis: {_e}\n\nVerifica tu ANTHROPIC_API_KEY y conexión a internet.")
 
     st.markdown('<div class="section-header" style="margin-top:24px">Filtros</div>', unsafe_allow_html=True)
 
@@ -333,12 +385,22 @@ with st.sidebar:
     only_pain = st.toggle("Pain points only", value=True)
     sort_by   = st.selectbox("Sort by", ["Opportunity Score", "Urgency score", "Upvotes", "Comments"], label_visibility="collapsed")
 
+    st.markdown("---")
+    _sb_total, _sb_analyzed, _sb_pain, _sb_pending = get_counts()
+    st.markdown(f"""
+<div style="font-size:11px;color:#475569;padding:8px 0">
+  <div style="margin-bottom:4px">📊 <strong style="color:#64748b">{_sb_total:,}</strong> posts scrapeados</div>
+  <div style="margin-bottom:4px">🔥 <strong style="color:#a78bfa">{_sb_pain:,}</strong> oportunidades</div>
+  <div>⏳ <strong style="color:#64748b">{_sb_pending:,}</strong> pendientes</div>
+</div>
+""", unsafe_allow_html=True)
+
 
 # ── Header ────────────────────────────────────────────────────────────────────
 total, analyzed, pain, pending = get_counts()
 
 st.markdown("""
-<div style="margin-bottom:28px">
+<div style="margin-bottom:8px">
   <h1 style="font-size:28px;font-weight:700;color:#f1f5f9;margin:0 0 4px">
     Business Opportunity Finder
   </h1>
@@ -347,6 +409,18 @@ st.markdown("""
   </p>
 </div>
 """, unsafe_allow_html=True)
+st.caption(f"🕐 {get_last_updated()}")
+
+# ── Setup checklist ───────────────────────────────────────────────────────────
+setup_items = check_setup()
+if not all(i["ok"] for i in setup_items):
+    with st.expander("⚙️ Guía de inicio rápido", expanded=True):
+        for item in setup_items:
+            icon = "✅" if item["ok"] else "❌"
+            if item["ok"]:
+                st.markdown(f"{icon} **{item['label']}**")
+            else:
+                st.markdown(f"{icon} **{item['label']}** — _{item['fix']}_")
 
 # Metrics
 hit_rate = f"{pain/analyzed*100:.0f}%" if analyzed else "—"
@@ -376,17 +450,39 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── Search bar ────────────────────────────────────────────────────────────────
-search_query = st.text_input("🔍 Buscar...", placeholder="Buscar por título, nicho, problema...")
+search_query = st.text_input("🔍 Buscar...", placeholder="Buscar por título, nicho, problema... (filtra en tiempo real)")
 
 # ── Load & filter data ────────────────────────────────────────────────────────
 df = load_data()
 
 if df.empty:
-    st.markdown("""
-    <div style="background:#0f0f1a;border:1px dashed #1e2035;border-radius:16px;padding:48px;text-align:center">
-      <div style="font-size:36px;margin-bottom:12px">🔍</div>
-      <div style="font-size:17px;font-weight:600;color:#e2e8f0;margin-bottom:8px">No data yet</div>
-      <div style="color:#475569;font-size:14px">Click <strong style="color:#a78bfa">Buscar Oportunidades</strong> in the sidebar to get started.</div>
+    _active_sources = []
+    if inc_reddit:    _active_sources.append("🟠 Reddit (" + ", ".join(selected_subs[:3]) + ("..." if len(selected_subs) > 3 else "") + ")" if selected_subs else "🟠 Reddit")
+    if inc_hn:        _active_sources.append("🟡 Hacker News")
+    if inc_yt_shorts: _active_sources.append("🔴 YouTube Shorts")
+    if inc_yt_videos: _active_sources.append("▶️ YouTube Videos")
+    if inc_ph:        _active_sources.append("🟠 Product Hunt")
+    if inc_twitter:   _active_sources.append("🐦 Twitter / X")
+    _sources_html = "".join(
+        f'<div style="margin:4px 0;color:#94a3b8">• {s}</div>'
+        for s in _active_sources
+    ) if _active_sources else '<div style="color:#475569">Ninguna fuente activa — activa al menos una en el sidebar.</div>'
+    st.markdown(f"""
+    <div style="background:#0f0f1a;border:1px dashed #1e2035;border-radius:16px;padding:48px 40px;max-width:600px;margin:0 auto">
+      <div style="font-size:36px;margin-bottom:16px;text-align:center">🔍</div>
+      <div style="font-size:18px;font-weight:700;color:#e2e8f0;margin-bottom:8px;text-align:center">Sin datos todavía</div>
+      <div style="color:#475569;font-size:14px;margin-bottom:24px;text-align:center">Sigue estos pasos para encontrar oportunidades de negocio:</div>
+      <div style="background:#080810;border-radius:10px;padding:16px 20px;margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Pasos</div>
+        <div style="color:#94a3b8;font-size:13px;margin-bottom:8px">1️⃣ Asegúrate de tener <strong style="color:#a78bfa">ANTHROPIC_API_KEY</strong> en tu <code>.env</code></div>
+        <div style="color:#94a3b8;font-size:13px;margin-bottom:8px">2️⃣ Activa las fuentes que quieras en el sidebar (Reddit, Hacker News, etc.)</div>
+        <div style="color:#94a3b8;font-size:13px;margin-bottom:8px">3️⃣ Haz click en <strong style="color:#a78bfa">🚀 Buscar Oportunidades</strong> en el sidebar</div>
+        <div style="color:#94a3b8;font-size:13px">4️⃣ ¡Espera unos minutos mientras Claude AI analiza los posts!</div>
+      </div>
+      <div style="background:#080810;border-radius:10px;padding:14px 20px">
+        <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Fuentes activas ahora</div>
+        {_sources_html}
+      </div>
     </div>
     """, unsafe_allow_html=True)
     st.stop()
@@ -505,14 +601,29 @@ if not pain_df.empty and "niche" in pain_df.columns:
         """, unsafe_allow_html=True)
 
 # ── Results header ────────────────────────────────────────────────────────────
-st.markdown(f"""
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-  <div>
-    <span style="font-size:18px;font-weight:700;color:#f1f5f9">Opportunities</span>
-    <span style="font-size:13px;color:#475569;margin-left:10px">{len(flt)} results</span>
-  </div>
+_col_title, _col_dl, _col_refresh = st.columns([5, 1, 1])
+with _col_title:
+    _label = "Pain Points" if only_pain else "Posts"
+    st.markdown(f"""
+<div style="padding-top:6px">
+  <span style="font-size:18px;font-weight:700;color:#f1f5f9">{len(flt):,} {_label}</span>
+  <span style="font-size:13px;color:#475569;margin-left:10px">encontrados · filtrados de {pain:,} oportunidades totales</span>
 </div>
 """, unsafe_allow_html=True)
+with _col_dl:
+    _export_cols = ["source","title","upvotes","category","niche","urgency_score","opportunity_score",
+                    "market_size","competition","monetization","problem_summary","solution","url"]
+    _export_cols = [c for c in _export_cols if c in flt.columns]
+    st.download_button(
+        "⬇️ CSV",
+        flt.drop(columns=["id"], errors="ignore").to_csv(index=False),
+        "painpoints.csv", "text/csv",
+        use_container_width=True,
+    )
+with _col_refresh:
+    if st.button("🔄", help="Actualizar datos", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab_all, tab_trending, tab_favorites, tab_niches = st.tabs(["🔥 Todas", "📈 Trending", "⭐ Favoritos", "🏷️ Por Nicho"])
@@ -659,13 +770,8 @@ with tab_niches:
 
 # ── Export ────────────────────────────────────────────────────────────────────
 st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-with st.expander("📋 Export data"):
+with st.expander("📋 Preview data"):
     cols = ["source","title","upvotes","category","niche","urgency_score","opportunity_score",
             "market_size","competition","monetization","problem_summary","solution","url"]
     export_cols = [c for c in cols if c in flt.columns]
     st.dataframe(flt[export_cols].head(200), use_container_width=True, hide_index=True)
-    st.download_button(
-        "⬇️ Download CSV",
-        flt.drop(columns=["id"], errors="ignore").to_csv(index=False),
-        "painpoints.csv", "text/csv",
-    )

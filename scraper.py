@@ -5,6 +5,24 @@ import requests
 from datetime import datetime
 from database import Session, PainPoint, init_db
 
+# Load .env manually (same approach as analyzer.py — avoids BOM issues on Windows)
+def _load_env():
+    for candidate in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.join(os.getcwd(), ".env"),
+    ]:
+        if os.path.exists(candidate):
+            with open(candidate, "rb") as f:
+                content = f.read().decode("utf-8-sig")
+            for line in content.splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ[k.strip()] = v.strip()
+            return
+
+_load_env()
+
 # Rotate User-Agents to avoid Reddit 403
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -549,6 +567,9 @@ def mark_trending():
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 # ── Twitter / X ───────────────────────────────────────────────────────────────
+# Uses Twitter API v2 (free tier) with a Bearer Token.
+# Get yours free at: https://developer.twitter.com/en/portal/dashboard
+# Add to .env: TWITTER_BEARER_TOKEN=your_bearer_token
 
 TWITTER_QUERIES = [
     "I wish there was an app",
@@ -565,92 +586,95 @@ TWITTER_QUERIES = [
 
 
 def scrape_twitter(max_tweets: int = 200) -> int:
-    """Scrape Twitter/X via twscrape (uses Twitter's internal API, no key needed).
-    Requires Twitter credentials in .env:
-      TWITTER_USER=your@email.com
-      TWITTER_PASS=yourpassword
-    If credentials are missing, uses guest mode (limited results).
+    """Search Twitter/X via the free API v2 (Bearer Token only — no login needed).
+
+    Setup (5 min, free):
+      1. Go to https://developer.twitter.com/en/portal/dashboard
+      2. Create a Project + App (free tier)
+      3. Copy the Bearer Token
+      4. Add to .env: TWITTER_BEARER_TOKEN=your_token_here
     """
-    try:
-        import asyncio
-        import twscrape
-    except ImportError:
-        print("  twscrape not installed: pip install twscrape")
+    bearer = os.environ.get("TWITTER_BEARER_TOKEN", "")
+    if not bearer:
+        print("  Twitter skipped — add TWITTER_BEARER_TOKEN to .env")
+        print("  Get free token at: developer.twitter.com/en/portal/dashboard")
         return 0
 
-    # Load Twitter credentials from env
-    tw_user = os.environ.get("TWITTER_USER", "")
-    tw_pass = os.environ.get("TWITTER_PASS", "")
+    headers = {"Authorization": f"Bearer {bearer}"}
+    init_db()
+    session = Session()
+    saved = 0
 
-    async def _run():
-        api = twscrape.API()
+    for query in TWITTER_QUERIES[:6]:
+        search = f"{query} -is:retweet lang:en"
+        url = "https://api.twitter.com/2/tweets/search/recent"
+        params = {
+            "query": search,
+            "max_results": 10,
+            "tweet.fields": "created_at,public_metrics,author_id",
+            "expansions": "author_id",
+            "user.fields": "username",
+        }
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=15)
 
-        if tw_user and tw_pass:
-            await api.pool.add_account(tw_user, tw_pass, tw_user, tw_pass)
-            await api.pool.login_all()
-
-        init_db()
-        session = Session()
-        saved = 0
-
-        for query in TWITTER_QUERIES[:6]:
-            search = f"{query} -filter:retweets lang:en"
-            try:
-                count = 0
-                async for tweet in api.search(search, limit=30):
-                    if count >= 30:
-                        break
-
-                    text = tweet.rawContent or ""
-                    if not text or (not text_has_pain_keyword(text) and tweet.likeCount < 5):
-                        count += 1
-                        continue
-
-                    pid = f"tw_{tweet.id}"
-                    if session.get(PainPoint, pid):
-                        count += 1
-                        continue
-
-                    pp = PainPoint(
-                        id=pid,
-                        source="twitter",
-                        author=tweet.user.username if tweet.user else "unknown",
-                        title=text[:120],
-                        body=text[:3000],
-                        url=f"https://twitter.com/i/web/status/{tweet.id}",
-                        upvotes=tweet.likeCount or 0,
-                        num_comments=tweet.replyCount or 0,
-                        created_at=tweet.date or datetime.utcnow(),
-                    )
-                    session.add(pp)
-                    saved += 1
-                    count += 1
-
-                session.commit()
-                await asyncio.sleep(1)
-
-            except Exception as e:
-                session.rollback()
-                print(f"    Twitter search error '{query}': {e}")
+            if resp.status_code == 401:
+                print("  Twitter: invalid bearer token")
+                break
+            if resp.status_code == 429:
+                print("  Twitter: rate limited, skipping remaining queries")
+                break
+            if resp.status_code != 200:
                 continue
 
-        session.close()
-        return saved
+            data = resp.json()
+            tweets = data.get("data") or []
+            users  = {u["id"]: u["username"] for u in (data.get("includes", {}).get("users") or [])}
 
-    try:
-        # Handle both new and existing event loops
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError
-            count = loop.run_until_complete(_run())
-        except RuntimeError:
-            count = asyncio.run(_run())
-        print(f"  Twitter/X -> {count} new posts saved")
-        return count
-    except Exception as e:
-        print(f"  Twitter scraper error: {e}")
-        return 0
+            for tweet in tweets:
+                text = tweet.get("text", "")
+                metrics = tweet.get("public_metrics", {})
+                likes = metrics.get("like_count", 0)
+
+                if not text or (not text_has_pain_keyword(text) and likes < 3):
+                    continue
+
+                pid = f"tw_{tweet['id']}"
+                if session.get(PainPoint, pid):
+                    continue
+
+                author = users.get(tweet.get("author_id", ""), "unknown")
+                created = tweet.get("created_at", "")
+                try:
+                    from datetime import timezone
+                    created_dt = datetime.strptime(created, "%Y-%m-%dT%H:%M:%S.%fZ")
+                except Exception:
+                    created_dt = datetime.utcnow()
+
+                pp = PainPoint(
+                    id=pid,
+                    source="twitter",
+                    author=author,
+                    title=text[:120],
+                    body=text[:3000],
+                    url=f"https://twitter.com/i/web/status/{tweet['id']}",
+                    upvotes=likes,
+                    num_comments=metrics.get("reply_count", 0),
+                    created_at=created_dt,
+                )
+                session.add(pp)
+                saved += 1
+
+            session.commit()
+            time.sleep(1)
+
+        except Exception as e:
+            session.rollback()
+            print(f"    Twitter error on '{query}': {e}")
+
+    session.close()
+    print(f"  Twitter/X -> {saved} new tweets saved")
+    return saved
 
 
 def run_scraper(
