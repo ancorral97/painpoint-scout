@@ -459,7 +459,6 @@ if df.empty:
     if inc_yt_shorts: _active_sources.append("🔴 YouTube Shorts")
     if inc_yt_videos: _active_sources.append("▶️ YouTube Videos")
     if inc_ph:        _active_sources.append("🟠 Product Hunt")
-    if inc_twitter:   _active_sources.append("🐦 Twitter / X")
     _sources_html = "".join(
         f'<div style="margin:4px 0;color:#94a3b8">• {s}</div>'
         for s in _active_sources
