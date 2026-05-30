@@ -713,10 +713,19 @@ def render_cards(df_view: pd.DataFrame, tab_key: str):
 </div>
 """, unsafe_allow_html=True)
 
-        fav_label = "⭐ Quitar favorito" if is_fav else "☆ Favorito"
-        if st.button(fav_label, key=f"fav_{tab_key}_{row['id']}", help="Toggle favorite"):
-            toggle_favorite(row['id'], is_fav)
-            st.rerun()
+        btn_col1, btn_col2 = st.columns([1, 1])
+        with btn_col1:
+            fav_label = "⭐ Quitar favorito" if is_fav else "☆ Favorito"
+            if st.button(fav_label, key=f"fav_{tab_key}_{row['id']}", use_container_width=True):
+                toggle_favorite(row['id'], is_fav)
+                st.rerun()
+        with btn_col2:
+            niche = row.get("niche", "") or row.get("category", "")
+            if niche:
+                from trends import translate_niche
+                en_term = translate_niche(niche)
+                trends_url = f"https://trends.google.com/trends/explore?q={en_term.replace(' ', '+')}&date=today+12-m"
+                st.link_button("📈 Ver en Google Trends", trends_url, use_container_width=True)
 
     # Pagination controls
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
@@ -781,18 +790,20 @@ with tab_trends:
     </div>
     """, unsafe_allow_html=True)
 
+    st.info("💡 **Cómo funciona:** Los nichos se extraen automáticamente de tus pain points analizados. Selecciona hasta 5 y haz click en Analizar — la app los traduce al inglés y consulta Google Trends. También puedes hacer click en **📈 Ver en Google Trends** desde cualquier card para abrirlo directamente.")
+
     # Get top niches from filtered data
     pain_df = df[df["is_pain_point"] == 1] if not df.empty else pd.DataFrame()
 
     if pain_df.empty or "niche" not in pain_df.columns:
-        st.info("Primero scrapea y analiza datos para ver tendencias.")
+        st.warning("Primero scrapea y analiza datos para ver tendencias.")
     else:
         top_niches = pain_df[pain_df["niche"] != ""]["niche"].value_counts().head(10).index.tolist()
 
         col_left, col_right = st.columns([2, 1])
         with col_left:
             selected_keywords = st.multiselect(
-                "Selecciona nichos para analizar (máx 5)",
+                "Nichos detectados en tus pain points (selecciona hasta 5)",
                 options=top_niches,
                 default=top_niches[:3],
                 max_selections=5,
