@@ -150,6 +150,7 @@ SOURCE_META = {
     "youtube_shorts": {"icon": "🔴", "label": "YouTube Shorts", "bg": "#1f0000", "color": "#f87171", "border": "#7f1d1d"},
     "youtube_videos": {"icon": "▶️", "label": "YouTube Videos", "bg": "#1a0a0a", "color": "#fca5a5", "border": "#991b1b"},
     "producthunt":    {"icon": "🟠", "label": "Product Hunt",   "bg": "#1a0a00", "color": "#ff6154", "border": "#7c2d12"},
+    "twitter":        {"icon": "🐦", "label": "Twitter / X",   "bg": "#00101a", "color": "#38bdf8", "border": "#0c4a6e"},
 }
 
 def source_badge(source: str) -> str:
@@ -244,6 +245,7 @@ with st.sidebar:
     inc_yt_shorts  = st.toggle("🔴 YouTube Shorts",  value=False)
     inc_yt_videos  = st.toggle("▶️ YouTube Videos",  value=False)
     inc_ph         = st.toggle("🟠 Product Hunt",    value=False)
+    inc_twitter    = st.toggle("🐦 Twitter / X",     value=False)
 
     selected_subs = []
     if inc_reddit:
@@ -270,6 +272,7 @@ with st.sidebar:
             include_yt_shorts=inc_yt_shorts,
             include_yt_videos=inc_yt_videos,
             include_ph=inc_ph,
+            include_twitter=inc_twitter,
         )
         new_posts = sum(results.values())
         st.cache_data.clear()
@@ -310,10 +313,11 @@ with st.sidebar:
     if inc_yt_shorts: active_sources.append("YouTube Shorts")
     if inc_yt_videos: active_sources.append("YouTube Videos")
     if inc_ph:        active_sources.append("Product Hunt")
+    if inc_twitter:   active_sources.append("Twitter / X")
 
     source_filter = st.multiselect(
         "Fuente",
-        ["Reddit", "Hacker News", "YouTube Shorts", "YouTube Videos", "Product Hunt"],
+        ["Reddit", "Hacker News", "YouTube Shorts", "YouTube Videos", "Product Hunt", "Twitter / X"],
         default=active_sources,
         placeholder="Todas las fuentes",
     )
@@ -397,6 +401,7 @@ if source_filter:
     if "YouTube Shorts"  in source_filter: masks.append(flt["source"] == "youtube_shorts")
     if "YouTube Videos"  in source_filter: masks.append(flt["source"] == "youtube_videos")
     if "Product Hunt"    in source_filter: masks.append(flt["source"] == "producthunt")
+    if "Twitter / X"    in source_filter: masks.append(flt["source"] == "twitter")
     if masks:
         import functools, operator
         combined = functools.reduce(operator.or_, masks)

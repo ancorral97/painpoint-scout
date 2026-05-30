@@ -1,3 +1,4 @@
+import os
 import time
 import random
 import requests
@@ -547,6 +548,111 @@ def mark_trending():
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
+# ── Twitter / X ───────────────────────────────────────────────────────────────
+
+TWITTER_QUERIES = [
+    "I wish there was an app",
+    "why is there no tool for",
+    "so frustrated with",
+    "there should be a service",
+    "nobody has solved",
+    "I hate that there's no",
+    "can't find a good solution",
+    "wasting so much time on",
+    "struggling with every day",
+    "why doesn't anyone build",
+]
+
+
+def scrape_twitter(max_tweets: int = 200) -> int:
+    """Scrape Twitter/X via twscrape (uses Twitter's internal API, no key needed).
+    Requires Twitter credentials in .env:
+      TWITTER_USER=your@email.com
+      TWITTER_PASS=yourpassword
+    If credentials are missing, uses guest mode (limited results).
+    """
+    try:
+        import asyncio
+        import twscrape
+    except ImportError:
+        print("  twscrape not installed: pip install twscrape")
+        return 0
+
+    # Load Twitter credentials from env
+    tw_user = os.environ.get("TWITTER_USER", "")
+    tw_pass = os.environ.get("TWITTER_PASS", "")
+
+    async def _run():
+        api = twscrape.API()
+
+        if tw_user and tw_pass:
+            await api.pool.add_account(tw_user, tw_pass, tw_user, tw_pass)
+            await api.pool.login_all()
+
+        init_db()
+        session = Session()
+        saved = 0
+
+        for query in TWITTER_QUERIES[:6]:
+            search = f"{query} -filter:retweets lang:en"
+            try:
+                count = 0
+                async for tweet in api.search(search, limit=30):
+                    if count >= 30:
+                        break
+
+                    text = tweet.rawContent or ""
+                    if not text or (not text_has_pain_keyword(text) and tweet.likeCount < 5):
+                        count += 1
+                        continue
+
+                    pid = f"tw_{tweet.id}"
+                    if session.get(PainPoint, pid):
+                        count += 1
+                        continue
+
+                    pp = PainPoint(
+                        id=pid,
+                        source="twitter",
+                        author=tweet.user.username if tweet.user else "unknown",
+                        title=text[:120],
+                        body=text[:3000],
+                        url=f"https://twitter.com/i/web/status/{tweet.id}",
+                        upvotes=tweet.likeCount or 0,
+                        num_comments=tweet.replyCount or 0,
+                        created_at=tweet.date or datetime.utcnow(),
+                    )
+                    session.add(pp)
+                    saved += 1
+                    count += 1
+
+                session.commit()
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                session.rollback()
+                print(f"    Twitter search error '{query}': {e}")
+                continue
+
+        session.close()
+        return saved
+
+    try:
+        # Handle both new and existing event loops
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError
+            count = loop.run_until_complete(_run())
+        except RuntimeError:
+            count = asyncio.run(_run())
+        print(f"  Twitter/X -> {count} new posts saved")
+        return count
+    except Exception as e:
+        print(f"  Twitter scraper error: {e}")
+        return 0
+
+
 def run_scraper(
     subreddits: list[str] = None,
     limit: int = 100,
@@ -555,6 +661,7 @@ def run_scraper(
     include_yt_shorts: bool = False,
     include_yt_videos: bool = False,
     include_ph: bool = False,
+    include_twitter: bool = False,
 ) -> dict:
     results = {}
     subs = subreddits or SUBREDDITS
@@ -579,6 +686,10 @@ def run_scraper(
     if include_ph:
         print("Scraping Product Hunt...")
         results["producthunt"] = scrape_producthunt()
+
+    if include_twitter:
+        print("Scraping Twitter/X...")
+        results["twitter"] = scrape_twitter()
 
     return results
 
