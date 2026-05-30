@@ -8,6 +8,7 @@ from sqlalchemy import func
 from database import Session, PainPoint, init_db
 from scraper import run_scraper, SUBREDDITS, mark_trending
 from analyzer import run_analyzer
+from trends import get_trend_data, trend_label
 
 st.set_page_config(
     page_title="PainPoint Scout",
@@ -621,7 +622,7 @@ with _col_refresh:
         st.rerun()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_all, tab_trending, tab_favorites, tab_niches = st.tabs(["🔥 Todas", "📈 Trending", "⭐ Favoritos", "🏷️ Por Nicho"])
+tab_all, tab_trending, tab_favorites, tab_niches, tab_trends = st.tabs(["🔥 Todas", "📈 Trending", "⭐ Favoritos", "🏷️ Por Nicho", "🌐 Google Trends"])
 
 # ── Pagination setup ──────────────────────────────────────────────────────────
 PAGE_SIZE = 20
@@ -770,3 +771,102 @@ with st.expander("📋 Preview data"):
             "market_size","competition","monetization","problem_summary","solution","url"]
     export_cols = [c for c in cols if c in flt.columns]
     st.dataframe(flt[export_cols].head(200), use_container_width=True, hide_index=True)
+
+# ── Google Trends Tab ─────────────────────────────────────────────────────────
+with tab_trends:
+    st.markdown("""
+    <div style="margin-bottom:20px">
+      <div style="font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:4px">🌐 Google Trends</div>
+      <div style="font-size:13px;color:#475569">Valida si los nichos encontrados están creciendo o bajando en búsquedas globales</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Get top niches from filtered data
+    pain_df = df[df["is_pain_point"] == 1] if not df.empty else pd.DataFrame()
+
+    if pain_df.empty or "niche" not in pain_df.columns:
+        st.info("Primero scrapea y analiza datos para ver tendencias.")
+    else:
+        top_niches = pain_df[pain_df["niche"] != ""]["niche"].value_counts().head(10).index.tolist()
+
+        col_left, col_right = st.columns([2, 1])
+        with col_left:
+            selected_keywords = st.multiselect(
+                "Selecciona nichos para analizar (máx 5)",
+                options=top_niches,
+                default=top_niches[:3],
+                max_selections=5,
+            )
+        with col_right:
+            timeframe = st.selectbox(
+                "Período",
+                ["today 1-m", "today 3-m", "today 12-m", "today 5-y"],
+                index=2,
+                format_func=lambda x: {"today 1-m":"1 mes","today 3-m":"3 meses","today 12-m":"12 meses","today 5-y":"5 años"}[x],
+            )
+
+        if st.button("🔍 Analizar tendencias", type="primary", use_container_width=False):
+            if not selected_keywords:
+                st.warning("Selecciona al menos un nicho.")
+            else:
+                with st.spinner("Consultando Google Trends..."):
+                    trend_results = get_trend_data(selected_keywords, timeframe=timeframe)
+
+                if not trend_results:
+                    st.error("No se pudieron obtener datos. Google Trends puede limitar requests frecuentes — espera 1 minuto e intenta de nuevo.")
+                else:
+                    # Summary cards
+                    st.markdown("#### Resumen")
+                    cols_t = st.columns(len(trend_results))
+                    for i, (kw, data) in enumerate(trend_results.items()):
+                        with cols_t[i]:
+                            color = "#22c55e" if data["direction"] == "up" else "#ef4444" if data["direction"] == "down" else "#94a3b8"
+                            st.markdown(f"""
+<div style="background:#0f0f1a;border:1px solid #1e2035;border-radius:12px;padding:16px;text-align:center">
+  <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">{kw}</div>
+  <div style="font-size:28px;font-weight:700;color:{color}">{data['arrow']}</div>
+  <div style="font-size:20px;font-weight:700;color:#f1f5f9;margin:4px 0">{data['score']}<span style="font-size:12px;color:#475569">/100</span></div>
+  <div style="font-size:12px;color:{color};font-weight:600">{trend_label(data['direction'], data['pct_change'])}</div>
+  <div style="font-size:11px;color:#475569;margin-top:4px">Pico: {data['peak']}</div>
+</div>
+""", unsafe_allow_html=True)
+
+                    # Line chart
+                    st.markdown("#### Interés a lo largo del tiempo")
+                    chart_data = {}
+                    for kw, data in trend_results.items():
+                        if data["dates"] and data["weekly"]:
+                            chart_data[kw] = pd.Series(data["weekly"], index=pd.to_datetime(data["dates"]))
+
+                    if chart_data:
+                        chart_df = pd.DataFrame(chart_data)
+                        fig = px.line(
+                            chart_df,
+                            title="",
+                            color_discrete_sequence=["#7c3aed","#06b6d4","#f97316","#22c55e","#ec4899"],
+                        )
+                        fig.update_layout(
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            font=dict(color="#94a3b8"),
+                            legend=dict(font=dict(color="#94a3b8")),
+                            xaxis=dict(gridcolor="#1e2035"),
+                            yaxis=dict(gridcolor="#1e2035", title="Interés (0-100)"),
+                            height=350,
+                            margin=dict(l=0, r=0, t=20, b=0),
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # Interpretation
+                    st.markdown("#### Interpretación")
+                    for kw, data in trend_results.items():
+                        if data["direction"] == "up":
+                            msg = f"**{kw}** está **creciendo** (+{data['pct_change']:.0f}%) — buen momento para entrar al mercado."
+                            icon = "🟢"
+                        elif data["direction"] == "down":
+                            msg = f"**{kw}** está **bajando** ({data['pct_change']:.0f}%) — el interés está disminuyendo."
+                            icon = "🔴"
+                        else:
+                            msg = f"**{kw}** es **estable** — mercado maduro con demanda constante."
+                            icon = "🟡"
+                        st.markdown(f"{icon} {msg}")
