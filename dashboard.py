@@ -9,6 +9,7 @@ from database import Session, PainPoint, init_db
 from scraper import run_scraper, SUBREDDITS, mark_trending
 from analyzer import run_analyzer
 from trends import get_trend_data, trend_label
+from validator import generate_validated_ideas
 
 st.set_page_config(
     page_title="PainPoint Scout",
@@ -667,7 +668,7 @@ with _col_refresh:
         st.rerun()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab_all, tab_trending, tab_favorites, tab_niches, tab_trends = st.tabs(["🔥 Todas", "📈 Trending", "⭐ Favoritos", "🏷️ Por Nicho", "🌐 Google Trends"])
+tab_all, tab_trending, tab_favorites, tab_niches, tab_trends, tab_validated = st.tabs(["🔥 Todas", "📈 Trending", "⭐ Favoritos", "🏷️ Por Nicho", "🌐 Google Trends", "💰 Ideas Validadas"])
 
 # ── Pagination setup ──────────────────────────────────────────────────────────
 PAGE_SIZE = 20
@@ -927,3 +928,104 @@ with tab_trends:
                             msg = f"**{kw}** es **estable** — mercado maduro con demanda constante."
                             icon = "🟡"
                         st.markdown(f"{icon} {msg}")
+
+# ── Ideas Validadas Tab ───────────────────────────────────────────────────────
+with tab_validated:
+    st.markdown("""
+    <div style="margin-bottom:16px">
+      <div style="font-size:18px;font-weight:700;color:#f1f5f9;margin-bottom:4px">💰 Ideas de Negocio Validadas</div>
+      <div style="font-size:13px;color:#475569">Modelos probados que llevan años generando dinero — basados en tus pain points reales</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    pain_df_val = df[df["is_pain_point"] == 1] if not df.empty else pd.DataFrame()
+
+    if pain_df_val.empty:
+        st.warning("Primero scrapea y analiza pain points para generar ideas validadas.")
+    else:
+        # Show top pain points that will be used
+        top_pps = pain_df_val.sort_values("urgency_score", ascending=False).head(10)
+
+        with st.expander("📋 Pain points usados como base", expanded=False):
+            for _, r in top_pps.iterrows():
+                st.markdown(f"- **[{r.get('category','?')}]** {r.get('problem_summary','') or r.get('title','')[:80]}")
+
+        col_gen, col_filter = st.columns([2, 1])
+        with col_gen:
+            gen_btn = st.button("🤖 Generar Ideas Validadas con IA", type="primary", use_container_width=True)
+        with col_filter:
+            min_score_val = st.slider("Score mínimo", 1, 10, 7, key="val_score")
+
+        # Cache ideas in session state so they don't regenerate on every interaction
+        if "validated_ideas" not in st.session_state:
+            st.session_state.validated_ideas = []
+
+        if gen_btn:
+            with st.spinner("Analizando pain points y generando ideas con Claude Sonnet... (~15 segundos)"):
+                pain_list = top_pps[["category","problem_summary","niche","urgency_score"]].to_dict("records")
+                ideas = generate_validated_ideas(pain_list)
+                st.session_state.validated_ideas = ideas
+                if not ideas:
+                    st.error("Error generando ideas. Verifica tu API key y vuelve a intentar.")
+
+        ideas = st.session_state.validated_ideas
+        if ideas:
+            filtered_ideas = [i for i in ideas if i.get("score_oportunidad", 0) >= min_score_val]
+            st.markdown(f"<div style='color:#475569;font-size:13px;margin-bottom:16px'>{len(filtered_ideas)} ideas con score ≥ {min_score_val}</div>", unsafe_allow_html=True)
+
+            for idea in sorted(filtered_ideas, key=lambda x: x.get("score_oportunidad", 0), reverse=True):
+                score = idea.get("score_oportunidad", 0)
+                score_color = "#22c55e" if score >= 8 else "#f97316" if score >= 6 else "#eab308"
+                modelo = idea.get("modelo", "")
+                ejemplos = idea.get("ejemplos_exitosos", [])
+                pasos = idea.get("como_empezar", "")
+
+                st.markdown(f"""
+<div style="background:#0f0f1a;border:1px solid #1e2035;border-radius:16px;padding:24px 28px;margin-bottom:16px;border-left:4px solid {score_color}">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+    <div>
+      <div style="font-size:17px;font-weight:700;color:#f1f5f9;margin-bottom:4px">{idea.get('nombre','')}</div>
+      <div style="font-size:13px;color:#94a3b8">{idea.get('descripcion','')}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0;margin-left:16px">
+      <div style="font-size:22px;font-weight:700;color:{score_color}">{score}/10</div>
+      <div style="font-size:11px;color:#475569">oportunidad</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+    <span style="background:#1e1b4b;color:#a5b4fc;border:1px solid #312e81;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">📦 {modelo}</span>
+    <span style="background:#052e16;color:#86efac;border:1px solid #14532d;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">💵 {idea.get('ingreso_mensual_estimado','')}</span>
+    <span style="background:#1a0f00;color:#fb923c;border:1px solid #7c2d12;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">⏱️ {idea.get('tiempo_para_primer_ingreso','')}</span>
+    <span style="background:#0c1a2e;color:#7dd3fc;border:1px solid #0c4a6e;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">📅 {idea.get('anos_en_mercado','')}</span>
+  </div>
+
+  <div style="background:#080810;border-radius:10px;padding:14px 16px;margin-bottom:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">🔥 Problema que resuelve</div>
+        <div style="font-size:13px;color:#cbd5e1">{idea.get('pain_point_que_resuelve','')}</div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">🏆 Ejemplos exitosos</div>
+        <div style="font-size:13px;color:#86efac">{' · '.join(ejemplos)}</div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">💡 Por qué dura años</div>
+        <div style="font-size:13px;color:#a78bfa">{idea.get('por_que_funciona_largo_plazo','')}</div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">⚠️ Riesgo principal</div>
+        <div style="font-size:13px;color:#fca5a5">{idea.get('riesgo_principal','')}</div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div style="font-size:11px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">🚀 Cómo empezar esta semana</div>
+    <div style="font-size:13px;color:#7dd3fc;line-height:1.8">{pasos}</div>
+  </div>
+
+</div>
+""", unsafe_allow_html=True)
