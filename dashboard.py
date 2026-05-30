@@ -523,8 +523,27 @@ sort_map = {
 }
 flt = flt.sort_values(sort_map[sort_by], ascending=False)
 
-# ── Charts ────────────────────────────────────────────────────────────────────
+# ── Charts (interactive filters) ─────────────────────────────────────────────
 pain_df = df[df["is_pain_point"] == 1]
+
+# Chart filter state
+if "chart_category" not in st.session_state: st.session_state.chart_category = None
+if "chart_urgency"  not in st.session_state: st.session_state.chart_urgency  = None
+if "chart_market"   not in st.session_state: st.session_state.chart_market   = None
+
+# Show active chart filter chip
+active_chips = []
+if st.session_state.chart_category: active_chips.append(("📁 " + st.session_state.chart_category, "chart_category"))
+if st.session_state.chart_urgency:  active_chips.append(("🔥 " + st.session_state.chart_urgency,  "chart_urgency"))
+if st.session_state.chart_market:   active_chips.append(("📊 " + st.session_state.chart_market,   "chart_market"))
+
+if active_chips:
+    chip_cols = st.columns([1]*len(active_chips) + [4])
+    for i, (label, key) in enumerate(active_chips):
+        with chip_cols[i]:
+            if st.button(f"{label} ✕", key=f"clear_{key}", help="Quitar filtro"):
+                st.session_state[key] = None
+                st.rerun()
 
 if not pain_df.empty:
     ch1, ch2, ch3 = st.columns(3)
@@ -534,10 +553,15 @@ if not pain_df.empty:
         cat.columns = ["category", "count"]
         fig = px.bar(cat, x="count", y="category", orientation="h",
                      color="count", color_continuous_scale=["#312e81","#7c3aed","#a78bfa"])
-        fig.update_layout(title=dict(text="By Category", font=dict(size=13, color="#94a3b8")),
+        fig.update_layout(title=dict(text="Por Categoría — click para filtrar", font=dict(size=13, color="#94a3b8")),
                           showlegend=False, yaxis=dict(gridcolor="#1e2035"),
                           xaxis=dict(gridcolor="#1e2035"), **CHART_THEME)
-        st.plotly_chart(fig, use_container_width=True)
+        sel_cat = st.plotly_chart(fig, use_container_width=True, on_select="rerun", key="chart_cat_click")
+        if sel_cat and sel_cat.get("selection", {}).get("points"):
+            clicked = sel_cat["selection"]["points"][0].get("label") or sel_cat["selection"]["points"][0].get("y")
+            if clicked and clicked != st.session_state.chart_category:
+                st.session_state.chart_category = clicked
+                st.rerun()
 
     with ch2:
         urg = pain_df["urgency_score"]
@@ -546,11 +570,16 @@ if not pain_df.empty:
         fig2 = go.Figure(go.Pie(
             labels=labels, values=vals, hole=.6,
             marker_colors=["#ef4444","#f97316","#eab308"],
-            textinfo="percent", textfont_size=12,
+            textinfo="percent+label", textfont_size=11,
         ))
-        fig2.update_layout(title=dict(text="Urgency Split", font=dict(size=13, color="#94a3b8")),
+        fig2.update_layout(title=dict(text="Urgencia — click para filtrar", font=dict(size=13, color="#94a3b8")),
                            legend=dict(font=dict(color="#94a3b8", size=11)), **CHART_THEME)
-        st.plotly_chart(fig2, use_container_width=True)
+        sel_urg = st.plotly_chart(fig2, use_container_width=True, on_select="rerun", key="chart_urg_click")
+        if sel_urg and sel_urg.get("selection", {}).get("points"):
+            clicked = sel_urg["selection"]["points"][0].get("label")
+            if clicked and clicked != st.session_state.chart_urgency:
+                st.session_state.chart_urgency = clicked
+                st.rerun()
 
     with ch3:
         if "market_size" in pain_df.columns and pain_df["market_size"].any():
@@ -559,24 +588,41 @@ if not pain_df.empty:
             order = {"small":0,"medium":1,"large":2}
             ms["ord"] = ms["size"].map(order)
             ms = ms.sort_values("ord")
-            fig3 = px.bar(ms, x="size", y="count",
-                          color="size",
+            fig3 = px.bar(ms, x="size", y="count", color="size",
                           color_discrete_map={"small":"#0284c7","medium":"#7c3aed","large":"#059669"})
-            fig3.update_layout(title=dict(text="Market Size", font=dict(size=13, color="#94a3b8")),
+            fig3.update_layout(title=dict(text="Mercado — click para filtrar", font=dict(size=13, color="#94a3b8")),
                                showlegend=False, xaxis=dict(gridcolor="#1e2035"),
                                yaxis=dict(gridcolor="#1e2035"), **CHART_THEME)
-            st.plotly_chart(fig3, use_container_width=True)
+            sel_mkt = st.plotly_chart(fig3, use_container_width=True, on_select="rerun", key="chart_mkt_click")
+            if sel_mkt and sel_mkt.get("selection", {}).get("points"):
+                clicked = sel_mkt["selection"]["points"][0].get("x")
+                if clicked and clicked != st.session_state.chart_market:
+                    st.session_state.chart_market = clicked
+                    st.rerun()
         else:
             src = pain_df["source"].value_counts().reset_index()
             src.columns = ["source","count"]
             fig3 = px.bar(src.head(6), x="source", y="count",
                           color="count", color_continuous_scale=["#0c4a6e","#0284c7","#7dd3fc"])
-            fig3.update_layout(title=dict(text="By Source", font=dict(size=13, color="#94a3b8")),
+            fig3.update_layout(title=dict(text="Por Fuente", font=dict(size=13, color="#94a3b8")),
                                showlegend=False, xaxis=dict(gridcolor="#1e2035"),
                                yaxis=dict(gridcolor="#1e2035"), **CHART_THEME)
             st.plotly_chart(fig3, use_container_width=True)
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+# Apply chart filters on top of existing filters
+if st.session_state.chart_category:
+    flt = flt[flt["category"] == st.session_state.chart_category]
+if st.session_state.chart_urgency:
+    if "7" in st.session_state.chart_urgency:
+        flt = flt[flt["urgency_score"] >= 7]
+    elif "4" in st.session_state.chart_urgency:
+        flt = flt[(flt["urgency_score"] >= 4) & (flt["urgency_score"] < 7)]
+    else:
+        flt = flt[flt["urgency_score"] < 4]
+if st.session_state.chart_market:
+    flt = flt[flt["market_size"] == st.session_state.chart_market]
 
 # ── Top niches strip ──────────────────────────────────────────────────────────
 if not pain_df.empty and "niche" in pain_df.columns:
