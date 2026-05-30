@@ -759,10 +759,10 @@ with tab_niches:
         if niches_list.empty:
             st.markdown("<div style='color:#475569;padding:16px'>No niche data available yet.</div>", unsafe_allow_html=True)
         else:
-            for niche_name in niches_list.index:
+            for niche_idx, niche_name in enumerate(niches_list.index):
                 niche_df = flt[flt["niche"] == niche_name]
                 with st.expander(f"#{niche_name}  ({len(niche_df)} posts)", expanded=False):
-                    render_cards(niche_df, f"niche_{niche_name[:20]}")
+                    render_cards(niche_df, f"niche_{niche_idx}")
 
 # ── Export ────────────────────────────────────────────────────────────────────
 st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
@@ -828,6 +828,7 @@ with tab_trends:
   <div style="font-size:20px;font-weight:700;color:#f1f5f9;margin:4px 0">{data['score']}<span style="font-size:12px;color:#475569">/100</span></div>
   <div style="font-size:12px;color:{color};font-weight:600">{trend_label(data['direction'], data['pct_change'])}</div>
   <div style="font-size:11px;color:#475569;margin-top:4px">Pico: {data['peak']}</div>
+  <div style="font-size:10px;color:#334155;margin-top:2px">🔍 "{data.get('en_term', kw)}"</div>
 </div>
 """, unsafe_allow_html=True)
 
