@@ -26,35 +26,43 @@ modelos de negocio probados que generan ingresos estables por años.
 Tu especialidad es encontrar ideas validadas — no tendencias, sino negocios con track record real.
 Responde siempre en español con JSON válido."""
 
-VALIDATION_PROMPT = """Basado en estos pain points reales encontrados en internet:
+VALIDATION_PROMPT = """Eres un investigador de negocios. Tienes dos fuentes de información:
 
+## FUENTE 1 — Pain points reales scrapeados de internet:
 {pain_points}
 
-Genera 5 ideas de negocio VALIDADAS que:
-1. Llevan AL MENOS 5 años generando dinero en el mercado
-2. Son replicables con bajo presupuesto inicial (<$5,000)
-3. Tienen demanda probada y constante (no son tendencias)
-4. Al menos una empresa exitosa ya lo está haciendo
+## FUENTE 2 — Tu conocimiento propio de negocios que han funcionado por años globalmente.
 
-Para cada idea devuelve este JSON (array de 5 objetos):
-[
-  {{
-    "nombre": "nombre corto del negocio",
-    "descripcion": "qué hace exactamente en 1 oración",
-    "modelo": "SaaS / Agencia / Marketplace / Info-producto / Servicio / etc",
-    "pain_point_que_resuelve": "cuál de los pain points anteriores resuelve",
-    "ejemplos_exitosos": ["Empresa1 ($XM ARR)", "Empresa2 (adquirida por $X)", "Empresa3"],
-    "anos_en_mercado": "cuántos años lleva este modelo funcionando",
-    "ingreso_mensual_estimado": "rango realista para un solo fundador: ej $2k-$8k/mes",
-    "tiempo_para_primer_ingreso": "ej: 2-4 semanas",
-    "como_empezar": "3 pasos concretos para arrancar esta semana",
-    "por_que_funciona_largo_plazo": "razón fundamental de su durabilidad",
-    "riesgo_principal": "el mayor riesgo o desafío",
-    "score_oportunidad": 1-10
-  }}
-]
+Tu tarea: Genera exactamente 8 ideas de negocio. Distribúyelas así:
+- **3 ideas** directamente inspiradas en los pain points anteriores
+- **3 ideas** de tu conocimiento de modelos probados en los mismos SECTORES (aunque no estén en los pain points)
+- **2 ideas** "wildcard" — negocios evergreen que casi siempre funcionan independiente del sector
 
-Solo JSON, sin texto extra."""
+Criterios obligatorios para TODAS:
+1. Llevan AL MENOS 5 años generando dinero (no son tendencias nuevas)
+2. Replicables con menos de $5,000 de inversión inicial
+3. Hay empresas reales haciendo esto HOY y ganando dinero
+4. Demanda constante, no estacional
+
+Para cada idea devuelve este JSON exacto:
+{{
+  "nombre": "nombre corto y memorable",
+  "descripcion": "qué hace exactamente en 1 oración clara",
+  "modelo": "SaaS / Agencia / Marketplace / Info-producto / Servicio B2B / Comunidad / etc",
+  "origen": "pain_point / sector_adyacente / wildcard",
+  "pain_point_que_resuelve": "el problema específico que ataca (puede ser inferido aunque no esté en la lista)",
+  "ejemplos_exitosos": ["Empresa real ($X ARR o revenue)", "Otra empresa (exit o fundada en año X)", "Una más"],
+  "anos_en_mercado": "X años (desde cuándo existe este modelo)",
+  "ingreso_mensual_estimado": "rango realista para fundador solo: $Xk-$Xk/mes en 12 meses",
+  "tiempo_para_primer_ingreso": "X semanas/meses siendo realista",
+  "como_empezar": "Paso 1: ... | Paso 2: ... | Paso 3: ...",
+  "por_que_funciona_largo_plazo": "la razón estructural de su durabilidad (ej: switching costs, red effect, etc)",
+  "riesgo_principal": "el obstáculo más probable que mata este negocio",
+  "competencia": "baja / media / alta",
+  "score_oportunidad": 1-10
+}}
+
+Devuelve un array JSON de 8 objetos. Solo JSON, sin texto extra."""
 
 
 def generate_validated_ideas(pain_points: list[dict]) -> list[dict]:

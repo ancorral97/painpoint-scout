@@ -950,6 +950,14 @@ with tab_validated:
             for _, r in top_pps.iterrows():
                 st.markdown(f"- **[{r.get('category','?')}]** {r.get('problem_summary','') or r.get('title','')[:80]}")
 
+        st.markdown("""
+<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+  <span style="background:#1a0a2e;color:#a78bfa;border:1px solid #4c1d95;border-radius:6px;padding:4px 12px;font-size:12px">🎯 <b>De tus pain points</b> — directamente de lo scrapeado</span>
+  <span style="background:#0c1a2e;color:#7dd3fc;border:1px solid #0c4a6e;border-radius:6px;padding:4px 12px;font-size:12px">🔭 <b>Sector relacionado</b> — modelos del mismo mercado</span>
+  <span style="background:#052e16;color:#86efac;border:1px solid #14532d;border-radius:6px;padding:4px 12px;font-size:12px">🃏 <b>Wildcard</b> — evergreen que funciona en cualquier contexto</span>
+</div>
+""", unsafe_allow_html=True)
+
         col_gen, col_filter = st.columns([2, 1])
         with col_gen:
             gen_btn = st.button("🤖 Generar Ideas Validadas con IA", type="primary", use_container_width=True)
@@ -976,14 +984,24 @@ with tab_validated:
             for idea in sorted(filtered_ideas, key=lambda x: x.get("score_oportunidad", 0), reverse=True):
                 score = idea.get("score_oportunidad", 0)
                 score_color = "#22c55e" if score >= 8 else "#f97316" if score >= 6 else "#eab308"
-                modelo = idea.get("modelo", "")
+                modelo  = idea.get("modelo", "")
+                origen  = idea.get("origen", "")
                 ejemplos = idea.get("ejemplos_exitosos", [])
-                pasos = idea.get("como_empezar", "")
+                pasos   = idea.get("como_empezar", "")
+                comp    = idea.get("competencia", "")
+
+                origen_badge = {
+                    "pain_point":       ("🎯 De tus pain points",   "#1a0a2e", "#a78bfa", "#4c1d95"),
+                    "sector_adyacente": ("🔭 Sector relacionado",   "#0c1a2e", "#7dd3fc", "#0c4a6e"),
+                    "wildcard":         ("🃏 Wildcard evergreen",    "#052e16", "#86efac", "#14532d"),
+                }.get(origen, ("📌 Validada", "#1e1b4b", "#a5b4fc", "#312e81"))
+
+                comp_color = {"baja": "#22c55e", "media": "#f97316", "alta": "#ef4444"}.get(comp, "#94a3b8")
 
                 st.markdown(f"""
 <div style="background:#0f0f1a;border:1px solid #1e2035;border-radius:16px;padding:24px 28px;margin-bottom:16px;border-left:4px solid {score_color}">
 
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
     <div>
       <div style="font-size:17px;font-weight:700;color:#f1f5f9;margin-bottom:4px">{idea.get('nombre','')}</div>
       <div style="font-size:13px;color:#94a3b8">{idea.get('descripcion','')}</div>
@@ -995,10 +1013,12 @@ with tab_validated:
   </div>
 
   <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+    <span style="background:{origen_badge[1]};color:{origen_badge[2]};border:1px solid {origen_badge[3]};border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">{origen_badge[0]}</span>
     <span style="background:#1e1b4b;color:#a5b4fc;border:1px solid #312e81;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">📦 {modelo}</span>
     <span style="background:#052e16;color:#86efac;border:1px solid #14532d;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">💵 {idea.get('ingreso_mensual_estimado','')}</span>
     <span style="background:#1a0f00;color:#fb923c;border:1px solid #7c2d12;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">⏱️ {idea.get('tiempo_para_primer_ingreso','')}</span>
     <span style="background:#0c1a2e;color:#7dd3fc;border:1px solid #0c4a6e;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">📅 {idea.get('anos_en_mercado','')}</span>
+    <span style="background:#111;color:{comp_color};border:1px solid {comp_color}40;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600">⚔️ competencia {comp}</span>
   </div>
 
   <div style="background:#080810;border-radius:10px;padding:14px 16px;margin-bottom:12px">
